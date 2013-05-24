@@ -1,0 +1,124 @@
+#!/usr/bin/env ruby
+
+# Source: https://github.com/jgraichen/munin-rubygems
+
+# Example usage:
+#  Do
+#    ln -s /path/to/rubygems_ rubygems_<id>_<type>
+#  where <id> is a ether a gem or a profile name
+#  and <type> is a tracking type (see below).
+#
+#  Do
+#    ln -s /path/to/rubygems_ rubygems_<whatever>
+#  if you want to configure plugin thru plugin config
+#  or want to track mulitple gems or profiles.
+#
+# Example config:
+#  [rubygems_<whatever>]
+#  env.title My Special Title for My Rubygem Graph
+#    Override graph title.
+#
+#  env.track rails-timeago wcc
+#    If type is 'gems': Specify list of gems to show in graph.
+#    Use 'jgraichen:gems' to monitor all gems from a profile.
+#
+#  env.track jgraichen cmur2
+#    If type is 'profile': Specify list of profiles to monitor.
+#
+#  env.type gems
+#    Specify graph mode. Values are 'gems', 'profiles'.
+#
+
+require 'rubygems'
+require 'json'
+require 'open-uri'
+
+basename = ENV['basename'] || File.basename($0)
+base = basename.split('_') + [nil, nil]
+base.shift
+@name = base.shift
+@type = ENV['type'] || base.shift || 'gems'
+@type = @type.to_sym
+raise ArgumentError.new "Unknown monitoring type: #{@type}" unless [:gems, :profiles]
+
+@command = ARGV[0]
+@tracks  = ENV['track'] ? ENV['track'].split : [ @name ]
+@otracks = @tracks.dup
+
+def remote_json(uri)
+	JSON.parse open(uri).read
+rescue OpenURI::HTTPError => err
+	puts "ERROR while fetching: #{uri}"
+	raise err
+end
+
+def gem_versions_url(gemname)
+	"https://rubygems.org/api/v1/versions/#{gemname}.json"
+end
+
+def gem_versions(gemname)
+	remote_json(gem_versions_url(gemname)).map{|d| d["number"] }
+end
+
+def gem_total_downloads_url(gemname, version)
+	"https://rubygems.org/api/v1/downloads/#{gemname}-#{version}.json"
+end
+
+def gem_total_downloads(gemname, version)
+	remote_json(gem_total_downloads_url(gemname, version))["total_downloads"].to_i
+end
+
+def profile_url(profile)
+	"https://rubygems.org/api/v1/owners/#{profile}/gems.json"
+end
+
+def profile_downloads(profile)
+	remote_json(profile_url(profile)).inject(0) {|m, d| m + d["downloads"].to_i }
+end
+
+def profile_gems(profile)
+	remote_json(profile_url(profile)).map {|d| d["name"] }
+end
+
+if @type == :gems
+	@tracks.map! do |track|
+		if track =~ /(\w+):(\w+)/
+			$2 == 'gems' ? profile_gems($1) : []
+		else
+			track
+		end
+	end
+	@tracks.flatten!
+end
+@tracks.uniq!
+@tracks.sort!
+
+case @command
+when 'config'
+	@title = ENV['title'] ? ENV['title'] : "Total downloads for #{@otracks.join ','}"
+	puts "graph_title #{@title}"
+	puts "graph_args --lower-limit 0"
+	puts "graph_vlabel Downloads"
+	puts "graph_category rubygems"
+	puts "graph_scale no"
+	puts "graph_info This graph show the total downloads of #{@otracks.join ','}"
+	@tracks.each do |track|
+		puts "#{track}.label #{track}"
+		puts "#{track}.info Total downloads of #{track}"
+		puts "#{track}.type COUNTER"
+	end
+else
+	@tracks.each do |track|
+		case @type
+		when :gems
+			version   = gem_versions(track).first
+			downloads = gem_total_downloads(track, version)
+			puts "#{track}.value #{downloads}"
+		when :profiles
+			downloads = profile_downloads(track)
+			puts "#{track}.value #{downloads}"
+		else
+			puts "#{track}.value 0"
+		end
+	end
+end
