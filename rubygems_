@@ -105,7 +105,7 @@ when 'config'
 	@tracks.each do |track|
 		puts "#{track}.label #{track}"
 		puts "#{track}.info Total downloads of #{track}"
-		puts "#{track}.type COUNTER"
+		puts "#{track}.type GAUGE"
 	end
 else
 	@tracks.each do |track|
