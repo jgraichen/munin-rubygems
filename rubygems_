@@ -76,14 +76,26 @@ def profile_downloads(profile)
 	remote_json(profile_url(profile)).inject(0) {|m, d| m + d["downloads"].to_i }
 end
 
+def profile_gems_downloads(profile)
+	remote_json(profile_url(profile)).map {|d| [ d["name"], d["downloads"] ] }
+end
+
 def profile_gems(profile)
 	remote_json(profile_url(profile)).map {|d| d["name"] }
 end
 
+@downloads = {}
 if @type == :gems
 	@tracks.map! do |track|
 		if track =~ /(\w+):(\w+)/
-			$2 == 'gems' ? profile_gems($1) : []
+			if $2 == 'gems'
+				profile_gems_downloads($1).map do |gem|
+					@downloads[gem[0]] = gem[1]
+					gem[0]
+				end
+			else
+				[]
+			end
 		else
 			track
 		end
@@ -111,8 +123,12 @@ else
 	@tracks.each do |track|
 		case @type
 		when :gems
-			version   = gem_versions(track).first
-			downloads = gem_total_downloads(track, version)
+			if @downloads[track]
+				downloads = @downloads[track]
+			else
+				version   = gem_versions(track).first
+				downloads = gem_total_downloads(track, version)
+			end
 			puts "#{track}.value #{downloads}"
 		when :profiles
 			downloads = profile_downloads(track)
